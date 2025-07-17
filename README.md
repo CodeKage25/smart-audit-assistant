@@ -351,7 +351,7 @@ The tool detects common smart contract vulnerabilities including:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/smart-audit-assistant.git
+git clone https://github.com/CodeKage25/smart-audit-assistant.git
 cd smart-audit-assistant
 
 # Create virtual environment
