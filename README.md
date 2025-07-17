@@ -254,7 +254,7 @@ flowchart TD
     I --> O[GH Actions]
     J & K --> O
   end
-
+```
 ## VS Code Extension
 
 Install the VS Code extension for inline diagnostics and quick fixes:
