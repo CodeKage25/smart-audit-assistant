@@ -28,7 +28,7 @@ pip install spoon-audit
 ### Install from Source
 
 ```bash
-git clone https://github.com/your-org/smart-audit-assistant.git
+git clone https://github.com/CodeKage25/smart-audit-assistant.git
 cd smart-audit-assistant
 pip install -e .
 ```
