@@ -1,0 +1,1115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spoon Audit Report</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+        
+        .header .subtitle {
+            opacity: 0.8;
+            font-size: 1.1em;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 30px;
+            background: #f8f9fa;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #3498db;
+        }
+        
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .section-title {
+            font-size: 1.8em;
+            margin: 40px 0 20px 0;
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        
+        .contract-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .contract-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+        }
+        
+        .contract-name {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 8px;
+        }
+        
+        .contract-stats {
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        .finding {
+            margin: 20px 0;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            transition: transform 0.2s ease;
+        }
+        
+        .finding:hover {
+            transform: translateY(-2px);
+        }
+        
+        .finding-header {
+            padding: 20px;
+            font-weight: bold;
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .finding-body {
+            padding: 20px;
+            background: white;
+        }
+        
+        .finding-meta {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        
+        .meta-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .meta-label {
+            font-weight: bold;
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 5px;
+        }
+        
+        .meta-value {
+            color: #2c3e50;
+        }
+        
+        .description, .reasoning, .suggestion {
+            margin: 15px 0;
+            padding: 15px;
+            border-radius: 6px;
+        }
+        
+        .description {
+            background: #e8f4f8;
+            border-left: 4px solid #3498db;
+        }
+        
+        .reasoning {
+            background: #f0f7ff;
+            border-left: 4px solid #5dade2;
+        }
+        
+        .suggestion {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+        
+        .section-label {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        /* Severity-specific colors */
+        .critical .finding-header { background: #e74c3c; }
+        .high .finding-header { background: #e67e22; }
+        .medium .finding-header { background: #f39c12; }
+        .low .finding-header { background: #27ae60; }
+        .info .finding-header { background: #3498db; }
+        
+        .confidence-badge {
+            background: rgba(255,255,255,0.2);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+        
+        .toc {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        
+        .toc h3 {
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+        
+        .toc ul {
+            list-style: none;
+        }
+        
+        .toc li {
+            margin: 8px 0;
+        }
+        
+        .toc a {
+            color: #3498db;
+            text-decoration: none;
+            padding: 5px 0;
+            display: block;
+        }
+        
+        .toc a:hover {
+            color: #2980b9;
+            text-decoration: underline;
+        }
+        
+        @media (max-width: 768px) {
+            .finding-meta {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats {
+                grid-template-columns: 1fr;
+            }
+            
+            .contract-summary {
+                grid-template-columns: 1fr;
+            }
+            
+            .header {
+                padding: 20px;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+        }
+        
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+            
+            .container {
+                box-shadow: none;
+            }
+            
+            .finding:hover {
+                transform: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🥄 Spoon Audit Security Report</h1>
+            <div class="subtitle">Comprehensive Smart Contract Analysis</div>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-number">2</div>
+                <div class="stat-label">Contracts Analyzed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">11</div>
+                <div class="stat-label">Static Analysis Findings</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">10</div>
+                <div class="stat-label">AI Analysis Findings</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">21</div>
+                <div class="stat-label">Total Issues Found</div>
+            </div>
+        </div>
+        
+        <div class="content">
+            <div class="finding-meta">
+                <div class="meta-item">
+                    <div class="meta-label">Contract Path</div>
+                    <div class="meta-value">contracts</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Analysis Date</div>
+                    <div class="meta-value">2025-08-06 06:46:46</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Report Generated</div>
+                    <div class="meta-value">2025-08-06 08:01:29</div>
+                </div>
+            </div>
+
+            <h2 class="section-title">📋 Contract Summary</h2>
+            <div class="contract-summary">
+
+                <div class="contract-card">
+                    <div class="contract-name">VulnerableContract</div>
+                    <div class="contract-stats">
+                        11 functions • 
+                        2 events • 
+                        2 modifiers
+                    </div>
+                </div>
+
+                <div class="contract-card">
+                    <div class="contract-name">VulnerableContract</div>
+                    <div class="contract-stats">
+                        11 functions • 
+                        2 events • 
+                        2 modifiers
+                    </div>
+                </div>
+            </div>
+
+            <div class="toc">
+                <h3>📋 Table of Contents</h3>
+                <ul>
+                    <li><a href="#static-findings">🔧 Static Analysis Findings (11)</a></li>
+                    <li><a href="#ai-findings">🤖 AI Analysis Findings (10)</a></li>
+                </ul>
+            </div>
+<div id="static-findings"><h2 class="section-title">🔧 Static Analysis Findings</h2>
+
+            <div class="finding high">
+                <div class="finding-header">
+                    <span>1. arbitrary-send-eth</span>
+                    <span class="confidence-badge">slither</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">HIGH</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Tool</div>
+                            <div class="meta-value">slither</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">contracts/SafeContract.sol:46</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>VulnerableContract.emergencyWithdraw() (contracts/SafeContract.sol#46-49) sends eth to arbitrary user
+	Dangerous calls:
+	- address(tx.origin).transfer(address(this).balance) (contracts/SafeContract.sol#48)
+</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding high">
+                <div class="finding-header">
+                    <span>2. reentrancy-eth</span>
+                    <span class="confidence-badge">slither</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">HIGH</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Tool</div>
+                            <div class="meta-value">slither</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">contracts/SafeContract.sol:33</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>Reentrancy in VulnerableContract.withdraw(uint256) (contracts/SafeContract.sol#33-43):
+	External calls:
+	- (success) = msg.sender.call{value: amount}() (contracts/SafeContract.sol#37)
+	State variables written after the call(s):
+	- balances[msg.sender] -= amount (contracts/SafeContract.sol#40)
+	VulnerableContract.balances (contracts/SafeContract.sol#9) can be used in cross function reentrancies:
+	- VulnerableContract.balances (contracts/SafeContract.sol#9)
+	- VulnerableContract.deposit() (contracts/SafeContract.sol#62-65)
+	- VulnerableContract.receive() (contracts/SafeContract.sol#94-97)
+	- VulnerableContract.secureWithdraw(uint256) (contracts/SafeContract.sol#81-91)
+	- VulnerableContract.withdraw(uint256) (contracts/SafeContract.sol#33-43)
+</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding medium">
+                <div class="finding-header">
+                    <span>3. tx-origin</span>
+                    <span class="confidence-badge">slither</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">MEDIUM</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Tool</div>
+                            <div class="meta-value">slither</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">contracts/SafeContract.sol:46</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>VulnerableContract.emergencyWithdraw() (contracts/SafeContract.sol#46-49) uses tx.origin for authorization: require(bool,string)(tx.origin == owner,Not authorized) (contracts/SafeContract.sol#47)
+</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding medium">
+                <div class="finding-header">
+                    <span>4. unchecked-lowlevel</span>
+                    <span class="confidence-badge">slither</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">MEDIUM</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Tool</div>
+                            <div class="meta-value">slither</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">contracts/SafeContract.sol:57</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>VulnerableContract.unsafeTransfer(address,uint256) (contracts/SafeContract.sol#57-59) ignores return value by to.call{value: amount}() (contracts/SafeContract.sol#58)
+</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding low">
+                <div class="finding-header">
+                    <span>5. missing-zero-check</span>
+                    <span class="confidence-badge">slither</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">LOW</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Tool</div>
+                            <div class="meta-value">slither</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">contracts/SafeContract.sol:57</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>VulnerableContract.unsafeTransfer(address,uint256).to (contracts/SafeContract.sol#57) lacks a zero-check on :
+		- to.call{value: amount}() (contracts/SafeContract.sol#58)
+</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding low">
+                <div class="finding-header">
+                    <span>6. missing-zero-check</span>
+                    <span class="confidence-badge">slither</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">LOW</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Tool</div>
+                            <div class="meta-value">slither</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">contracts/SafeContract.sol:75</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>VulnerableContract.changeOwner(address).newOwner (contracts/SafeContract.sol#75) lacks a zero-check on :
+		- owner = newOwner (contracts/SafeContract.sol#77)
+</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding low">
+                <div class="finding-header">
+                    <span>7. calls-loop</span>
+                    <span class="confidence-badge">slither</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">LOW</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Tool</div>
+                            <div class="meta-value">slither</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">contracts/SafeContract.sol:68</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>VulnerableContract.massTransfer(address[],uint256) (contracts/SafeContract.sol#68-72) has external calls inside a loop: address(recipients[i]).transfer(amount) (contracts/SafeContract.sol#70)
+</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding low">
+                <div class="finding-header">
+                    <span>8. reentrancy-events</span>
+                    <span class="confidence-badge">slither</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">LOW</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Tool</div>
+                            <div class="meta-value">slither</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">contracts/SafeContract.sol:81</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>Reentrancy in VulnerableContract.secureWithdraw(uint256) (contracts/SafeContract.sol#81-91):
+	External calls:
+	- (success) = msg.sender.call{value: amount}() (contracts/SafeContract.sol#87)
+	Event emitted after the call(s):
+	- Withdrawal(msg.sender,amount) (contracts/SafeContract.sol#90)
+</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding low">
+                <div class="finding-header">
+                    <span>9. reentrancy-events</span>
+                    <span class="confidence-badge">slither</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">LOW</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Tool</div>
+                            <div class="meta-value">slither</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">contracts/SafeContract.sol:33</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>Reentrancy in VulnerableContract.withdraw(uint256) (contracts/SafeContract.sol#33-43):
+	External calls:
+	- (success) = msg.sender.call{value: amount}() (contracts/SafeContract.sol#37)
+	Event emitted after the call(s):
+	- Withdrawal(msg.sender,amount) (contracts/SafeContract.sol#42)
+</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding low">
+                <div class="finding-header">
+                    <span>10. timestamp</span>
+                    <span class="confidence-badge">slither</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">LOW</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Tool</div>
+                            <div class="meta-value">slither</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">contracts/SafeContract.sol:52</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>VulnerableContract.timeLock() (contracts/SafeContract.sol#52-54) uses timestamp for comparisons
+	Dangerous comparisons:
+	- block.timestamp > 1234567890 (contracts/SafeContract.sol#53)
+</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding informational">
+                <div class="finding-header">
+                    <span>11. solc-version</span>
+                    <span class="confidence-badge">slither</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">INFORMATIONAL</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Tool</div>
+                            <div class="meta-value">slither</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">contracts/SafeContract.sol:2</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>Pragma version^0.8.19 (contracts/SafeContract.sol#2) necessitates a version too recent to be trusted. Consider deploying with 0.8.18.
+</div>
+                    </div>
+                </div>
+            </div>
+</div>
+<div id="ai-findings"><h2 class="section-title">🤖 AI Analysis Findings</h2>
+
+            <div class="finding high">
+                <div class="finding-header">
+                    <span>1. Reentrancy vulnerability in withdraw function</span>
+                    <span class="confidence-badge">Confidence: 1.0</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">HIGH</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Confidence</div>
+                            <div class="meta-value">1.0</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">VulnerableContract:withdraw</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>The withdraw function makes external calls before updating state, allowing for reentrancy attacks.</div>
+                    </div>
+
+                    <div class="reasoning">
+                        <div class="section-label">Technical Reasoning</div>
+                        <div>External call to msg.sender.call{value: amount}() occurs before balance update, which can lead to reentrancy attack.</div>
+                    </div>
+
+                    <div class="suggestion">
+                        <div class="section-label">Suggested Fix</div>
+                        <div>Use checks-effects-interactions pattern: update state before external calls.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding high">
+                <div class="finding-header">
+                    <span>2. Improper use of tx.origin for authorization</span>
+                    <span class="confidence-badge">Confidence: 1.0</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">HIGH</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Confidence</div>
+                            <div class="meta-value">1.0</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">VulnerableContract:emergencyWithdraw</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>The emergencyWithdraw function uses tx.origin for authorization, which can be manipulated by a malicious contract.</div>
+                    </div>
+
+                    <div class="reasoning">
+                        <div class="section-label">Technical Reasoning</div>
+                        <div>tx.origin refers to the original sender of the transaction, not the current function caller, which can be manipulated by a malicious contract.</div>
+                    </div>
+
+                    <div class="suggestion">
+                        <div class="section-label">Suggested Fix</div>
+                        <div>Replace tx.origin with msg.sender for proper authorization.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding medium">
+                <div class="finding-header">
+                    <span>3. Unchecked external call in unsafeTransfer function</span>
+                    <span class="confidence-badge">Confidence: 1.0</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">MEDIUM</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Confidence</div>
+                            <div class="meta-value">1.0</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">VulnerableContract:unsafeTransfer</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>The unsafeTransfer function makes an external call without checking the return value.</div>
+                    </div>
+
+                    <div class="reasoning">
+                        <div class="section-label">Technical Reasoning</div>
+                        <div>External call to to.call{value: amount}() is not checked for success or failure, which can lead to loss of funds.</div>
+                    </div>
+
+                    <div class="suggestion">
+                        <div class="section-label">Suggested Fix</div>
+                        <div>Always check the return value of external calls.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding medium">
+                <div class="finding-header">
+                    <span>4. Block timestamp dependency in timeLock function</span>
+                    <span class="confidence-badge">Confidence: 0.8</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">MEDIUM</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Confidence</div>
+                            <div class="meta-value">0.8</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">VulnerableContract:timeLock</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>The timeLock function depends on block.timestamp, which can be manipulated by miners.</div>
+                    </div>
+
+                    <div class="reasoning">
+                        <div class="section-label">Technical Reasoning</div>
+                        <div>block.timestamp can be manipulated by miners to a certain degree, which can lead to unexpected behavior.</div>
+                    </div>
+
+                    <div class="suggestion">
+                        <div class="section-label">Suggested Fix</div>
+                        <div>Avoid using block.timestamp for critical logic.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding low">
+                <div class="finding-header">
+                    <span>5. Potential integer overflow in deposit function</span>
+                    <span class="confidence-badge">Confidence: 0.5</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">LOW</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Confidence</div>
+                            <div class="meta-value">0.5</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">VulnerableContract:deposit</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>The deposit function does not check for integer overflow, although Solidity 0.8+ has built-in checks.</div>
+                    </div>
+
+                    <div class="reasoning">
+                        <div class="section-label">Technical Reasoning</div>
+                        <div>Integer overflow can lead to unexpected behavior, although Solidity 0.8+ has built-in checks.</div>
+                    </div>
+
+                    <div class="suggestion">
+                        <div class="section-label">Suggested Fix</div>
+                        <div>Always check for integer overflow and underflow.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding high">
+                <div class="finding-header">
+                    <span>6. Reentrancy vulnerability in withdraw function</span>
+                    <span class="confidence-badge">Confidence: 1.0</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">HIGH</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Confidence</div>
+                            <div class="meta-value">1.0</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">VulnerableContract:withdraw</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>The withdraw function makes external calls before updating state, allowing for reentrancy attacks.</div>
+                    </div>
+
+                    <div class="reasoning">
+                        <div class="section-label">Technical Reasoning</div>
+                        <div>External call to msg.sender.call{value: amount}() occurs before balance update.</div>
+                    </div>
+
+                    <div class="suggestion">
+                        <div class="section-label">Suggested Fix</div>
+                        <div>Use checks-effects-interactions pattern: update state before external calls.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding high">
+                <div class="finding-header">
+                    <span>7. Use of tx.origin for authorization</span>
+                    <span class="confidence-badge">Confidence: 1.0</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">HIGH</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Confidence</div>
+                            <div class="meta-value">1.0</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">VulnerableContract:emergencyWithdraw</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>The emergencyWithdraw function uses tx.origin for authorization which can be manipulated by malicious contracts.</div>
+                    </div>
+
+                    <div class="reasoning">
+                        <div class="section-label">Technical Reasoning</div>
+                        <div>tx.origin refers to the original sender of the transaction and can be manipulated by malicious contracts.</div>
+                    </div>
+
+                    <div class="suggestion">
+                        <div class="section-label">Suggested Fix</div>
+                        <div>Replace tx.origin with msg.sender for authorization.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding medium">
+                <div class="finding-header">
+                    <span>8. Block timestamp dependency</span>
+                    <span class="confidence-badge">Confidence: 0.8</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">MEDIUM</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Confidence</div>
+                            <div class="meta-value">0.8</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">VulnerableContract:timeLock</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>The timeLock function depends on block.timestamp which can be manipulated by miners.</div>
+                    </div>
+
+                    <div class="reasoning">
+                        <div class="section-label">Technical Reasoning</div>
+                        <div>block.timestamp can be manipulated by miners to a certain degree.</div>
+                    </div>
+
+                    <div class="suggestion">
+                        <div class="section-label">Suggested Fix</div>
+                        <div>Avoid using block.timestamp for critical logic.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding medium">
+                <div class="finding-header">
+                    <span>9. Unchecked external call</span>
+                    <span class="confidence-badge">Confidence: 1.0</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">MEDIUM</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Confidence</div>
+                            <div class="meta-value">1.0</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">VulnerableContract:unsafeTransfer</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>The unsafeTransfer function makes an external call without checking the return value.</div>
+                    </div>
+
+                    <div class="reasoning">
+                        <div class="section-label">Technical Reasoning</div>
+                        <div>External calls can fail silently if the return value is not checked.</div>
+                    </div>
+
+                    <div class="suggestion">
+                        <div class="section-label">Suggested Fix</div>
+                        <div>Always check the return value of external calls.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="finding low">
+                <div class="finding-header">
+                    <span>10. Potential integer overflow in deposit function</span>
+                    <span class="confidence-badge">Confidence: 0.5</span>
+                </div>
+                <div class="finding-body">
+                    <div class="finding-meta">
+                        <div class="meta-item">
+                            <div class="meta-label">Severity</div>
+                            <div class="meta-value">LOW</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Confidence</div>
+                            <div class="meta-value">0.5</div>
+                        </div>
+                        <div class="meta-item">
+                            <div class="meta-label">Location</div>
+                            <div class="meta-value">VulnerableContract:deposit</div>
+                        </div>
+                    </div>
+
+                    <div class="description">
+                        <div class="section-label">Description</div>
+                        <div>The deposit function could potentially have an integer overflow issue, although Solidity 0.8+ has built-in overflow checks.</div>
+                    </div>
+
+                    <div class="reasoning">
+                        <div class="section-label">Technical Reasoning</div>
+                        <div>Integer overflow can occur when a number is incremented beyond the maximum value that can be stored in its data type.</div>
+                    </div>
+
+                    <div class="suggestion">
+                        <div class="section-label">Suggested Fix</div>
+                        <div>Use SafeMath library or similar to prevent integer overflow.</div>
+                    </div>
+                </div>
+            </div>
+</div>
+
+        </div>
+    </div>
+    
+    <script>
+        // Smooth scrolling for table of contents
+        document.querySelectorAll('.toc a').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                document.querySelector(this.getAttribute('href')).scrollIntoView({
+                    behavior: 'smooth'
+                });
+            });
+        });
+        
+        // Print functionality
+        function printReport() {
+            window.print();
+        }
+        
+        // Add print button
+        const header = document.querySelector('.header');
+        const printBtn = document.createElement('button');
+        printBtn.innerHTML = '🖨️ Print Report';
+        printBtn.style.cssText = `
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+        `;
+        printBtn.onclick = printReport;
+        header.appendChild(printBtn);
+    </script>
+</body>
+</html>

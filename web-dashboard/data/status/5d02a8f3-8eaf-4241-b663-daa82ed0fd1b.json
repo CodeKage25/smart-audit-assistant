@@ -1,0 +1,6 @@
+{
+  "scanId": "5d02a8f3-8eaf-4241-b663-daa82ed0fd1b",
+  "status": "failed",
+  "message": "Pipeline execution failed: Static analysis failed: Command failed: spoon-audit scan \"/Users/user/Downloads/smart‑audit‑assistant/web-dashboard/uploads/SafeContract.sol\" --no-ai --tools=slither,mythril,solhint --severity=medium --pipeline=thorough --output-format=json\n/Users/user/Downloads/smart‑audit‑assistant/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020\n  warnings.warn(\nUsage: spoon-audit scan [OPTIONS] PATH\nTry 'spoon-audit scan --help' for help.\n\nError: No such option: --tools\n",
+  "timestamp": 1754462468033
+}

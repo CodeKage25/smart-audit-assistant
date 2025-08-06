@@ -1,0 +1,46 @@
+{
+  "name": "vscode-spoon-audit",
+  "displayName": "Spoon Audit",
+  "description": "Inline Solidity audit diagnostics via the spoon‑audit CLI",
+  "version": "0.0.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CodeKage25/smart‑audit‑assistant/tree/main/extension"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:spoon-audit.runScan",
+    "onLanguage:solidity"
+  ],
+  "main": "./out/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p ."
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "spoon-audit.runScan",
+        "title": "Spoon Audit: Scan Contract"
+      }
+    ]
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^24.0.14",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.8.3",
+    "vscode": "^1.1.37"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}
