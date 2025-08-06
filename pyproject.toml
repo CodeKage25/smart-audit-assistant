@@ -46,16 +46,15 @@ dependencies = [
     # Use compatible pydantic v1 that works with typing-extensions <4
     "pydantic>=1.8.0,<1.10.0",
 
-    # Static analysis - use more compatible versions
+    # Static analysis 
     "slither-analyzer>=0.8.0,<0.10.0",
-    # Skip mythril for now due to dependency conflicts, or use older version
-    # "mythril==0.22.0",  # Try older version if needed
+   
+    # "mythril==0.22.0",  
 
-    # AI integration - use compatible OpenAI version
+   
     "openai>=0.27.0,<1.0.0",
     
-    # SpoonOS integration (if available)
-    # Add spoon-ai package when it becomes available
+   
 ]
 
 [project.optional-dependencies]
