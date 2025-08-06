@@ -2,6 +2,9 @@
 
 An interactive SpoonOS-powered tool that provides real-time vulnerability checks, natural-language explanations, and hands-on learning for your Solidity contracts—before you deploy.
 
+🎥 Demo Video
+Watch the Live Demo: AI-Powered Smart Contract Audit Assistant in Action [AI-Powered Smart Contract Audit Assistant – Live Demo](https://vimeo.com/1107921995?share=copy)  
+
 ## Features
 
 - **Real-time Security Analysis**: Instant vulnerability detection using static analysis tools (Slither, Mythril, Solhint)
