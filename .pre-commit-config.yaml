@@ -1,3 +1,8 @@
+exclude: |
+  (^dist/)|(^build/)|(^node_modules/)|
+  (^\.venv/)|(^venv/)|
+  (^spoon_audit_report_.*\.html$)
+
 repos:
   - repo: https://github.com/psf/black
     rev: 24.4.2
@@ -26,10 +31,10 @@ repos:
     rev: v5.0.0
     hooks:
       - id: check-added-large-files
-        stages: [commit]            
+        stages: [commit]
       - id: end-of-file-fixer
-        stages: [commit]            
+        stages: [commit]
       - id: trailing-whitespace
-        stages: [commit]            
+        stages: [commit]
       - id: debug-statements
-        stages: [commit]            
+        stages: [commit]
