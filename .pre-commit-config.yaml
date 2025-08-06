@@ -10,7 +10,7 @@ repos:
       - id: black
         language_version: python3
         args: [--check, --diff]
-        stages: [commit, push]
+        stages: [commit]           # not on push
 
   - repo: https://github.com/PyCQA/flake8
     rev: 7.1.0
@@ -18,32 +18,23 @@ repos:
       - id: flake8
         additional_dependencies: [flake8-bugbear]
         args:
-          
           - --max-line-length=88
           - --extend-ignore=E203,W503
-          
-          - >-
-            --per-file-ignores=
-            tests/*.py:F401,E302,W293,W292,E501,
-            tests/conftest.py:E302,W293,W292,E501
-        stages: [commit, push]
+          # If you want flake8 off even locally for certain dirs, uncomment next line:
+          # - --exclude=analysis/*,cli/*,tests/*
+        stages: [commit]           # not on push
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.10.0
     hooks:
       - id: mypy
         args:
-          
           - --ignore-missing-imports
           - --allow-untyped-defs
           - --implicit-optional
-          
-          - >-
-            --exclude=
-            ^(tests/|web-dashboard/|extension/|
-            analysis/ai_analyzer\.py|cli/config\.py|
-            analysis/pipeline_manager\.py|analysis/parser\.py)$
-        stages: [commit, push]
+          # If you want mypy off for certain dirs locally, uncomment next line:
+          # - --exclude=^(analysis/|cli/|tests/)$
+        stages: [commit]           # not on push
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
