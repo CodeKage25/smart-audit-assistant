@@ -47,8 +47,12 @@ def main(ctx: click.Context, debug: bool):
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--no-ai", is_flag=True, default=False, help="Skip AI analysis")
 @click.option("--detailed", is_flag=True, default=False, help="Show detailed findings immediately")
+@click.option("--spoon-agent", "spoon_agent",
+              type=click.Choice(["react", "spoon_react_mcp", "custom"]),
+              default=None,
+              help="Use Spoon agent (requires spoon_ai & deps)")
 @click.pass_context
-def scan(ctx: click.Context, path: str, no_ai: bool, detailed: bool):
+def scan(ctx: click.Context, path: str, no_ai: bool, detailed: bool, spoon_agent: Optional[str]):
     """
     Analyze a Solidity file or project directory.
 
@@ -59,7 +63,12 @@ def scan(ctx: click.Context, path: str, no_ai: bool, detailed: bool):
 
     parser         = SolidityParser(debug=debug)
     static_scanner = StaticScanner(debug=debug)
-    ai_analyzer    = AIAnalyzer(debug=debug)
+    ai_analyzer = AIAnalyzer(
+    debug=debug,
+    use_spoon_agent=bool(spoon_agent),
+    spoon_agent_type=(spoon_agent or "react")
+)
+
 
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as prog:
         # 1. Parse - Now returns a list of contracts

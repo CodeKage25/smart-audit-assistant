@@ -75,6 +75,9 @@ spoon-audit scan ./contracts/
 
 # Enable debug mode for detailed output
 spoon-audit scan --debug ./contracts/MyContract.sol
+
+# scan specifically with spoonos agent
+spoon-audit --debug scan contracts/VulnerableContract.sol --spoon-agent react
 ```
 
 ### 3. View Reports

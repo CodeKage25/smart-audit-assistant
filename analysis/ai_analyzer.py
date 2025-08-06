@@ -14,6 +14,12 @@ from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import logging
 
+import asyncio
+try:
+    import nest_asyncio  # we already depend on it
+except ImportError:
+    nest_asyncio = None
+
 # Try to import advanced ML libraries
 try:
     import numpy as np
@@ -44,7 +50,6 @@ except ImportError:
 # Try to import SpoonOS components
 SPOON_AVAILABLE = False
 try:
-    # Preferred: package often exposes underscore name for hyphenated PyPI package
     from spoon_ai.chat import ChatBot
     from spoon_ai.agents import SpoonReactAI, SpoonReactMCP, ToolCallAgent
     from spoon_ai.tools.base import BaseTool
@@ -81,7 +86,7 @@ class PipelineConfig:
     max_workers: int = 4
     ai_models: List[str] = None
     static_tools: List[str] = None
-    spoon_agent_type: str = "react"  # react, spoon_react_mcp
+    spoon_agent_type: str = "react"  
     
     def __post_init__(self):
         if self.ai_models is None:
@@ -89,7 +94,7 @@ class PipelineConfig:
         if self.static_tools is None:
             self.static_tools = ["slither", "mythril", "solhint"]
 
-# SpoonOS Security Analysis Tool
+
 class SpoonSecurityTool(BaseTool):
     """Custom tool for security analysis within SpoonOS agents"""
     
@@ -191,11 +196,9 @@ class SpoonContractAgent(ToolCallAgent):
         # Set up available tools
         from pydantic import Field
         
-        available_tools = ToolManager([
-            SpoonSecurityTool(),
-        ])
+        tools = [SpoonSecurityTool()]
         
-        super().__init__(available_tools=available_tools, llm=llm, **kwargs)
+        super().__init__(available_tools=tools, llm=llm, **kwargs)
 
 class AIAnalyzer:
     """
@@ -231,23 +234,40 @@ class AIAnalyzer:
                     openai.api_base = self.base_url
                 self.openai_client = openai
 
+        inferred = "openrouter" if "openrouter" in (self.spoon_base_url or "").lower() else "openai"
         # Initialize SpoonOS agent
         self.spoon_agent = None
         if use_spoon_agent and SPOON_AVAILABLE and self.spoon_key:
             try:
+                provider = (os.getenv("SPOON_PROVIDER", inferred) or inferred).lower()
+                if provider in ("openrouter", "openai"):
+                    provider = "openai"
+                elif provider in ("anthropic", "claude"):
+                    provider = "anthropic"
+                else:
+                    provider = "openai"  # safe default
+
                 llm = ChatBot(
-                    llm_provider="openai",  # Provider for SpoonOS
+                    llm_provider=provider,
                     model_name=self.spoon_model,
                     api_key=self.spoon_key,
                     base_url=self.spoon_base_url
                 )
+                agent_debug = str(os.getenv("SPOON_AGENT_DEBUG", "0")).lower() in ("1", "true", "yes")
                 
                 if spoon_agent_type == "spoon_react_mcp":
-                    self.spoon_agent = SpoonReactMCP(llm=llm, debug=debug)
+                    self.spoon_agent = SpoonReactMCP(llm=llm, debug=agent_debug)
                 elif spoon_agent_type == "custom":
-                    self.spoon_agent = SpoonContractAgent(llm=llm, debug=debug)
+                    self.spoon_agent = SpoonContractAgent(llm=llm, debug=agent_debug)
                 else:  # Default to react
-                    self.spoon_agent = SpoonReactAI(llm=llm, debug=debug)
+                    self.spoon_agent = SpoonReactAI(llm=llm, debug=agent_debug)
+                    try:
+                        self.spoon_agent = SpoonReactAI(llm=llm, debug=agent_debug, available_tools=[])
+                    except TypeError:
+                        self.spoon_agent = SpoonReactAI(llm=llm, debug=agent_debug)
+
+                if debug:
+                    print(f"[ai] Spoon agent debug (steps tracing) = {agent_debug}")    
                     
             except Exception as e:
                 if debug:
@@ -261,6 +281,68 @@ class AIAnalyzer:
             print(f"[ai] Using SpoonOS: {use_spoon_agent}")
             print(f"[ai] SpoonOS agent type: {spoon_agent_type}")
 
+       # ---- helpers for running async code and normalizing outputs ----
+    
+    def _arun(self, awaitable):
+        """
+        Run an awaitable from sync code.
+        Uses asyncio.run when no loop is running; otherwise uses loop.run_until_complete,
+        enabling nest_asyncio if available.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            if nest_asyncio:
+                nest_asyncio.apply()
+            return loop.run_until_complete(awaitable)
+        else:
+            return asyncio.run(awaitable)
+
+    def _to_text(self, resp) -> str:
+        """
+        Normalize agent response to plain text.
+        Handles string, dict-like, and message-list shapes.
+        """
+        if resp is None:
+            return ""
+        if isinstance(resp, str):
+            return resp
+
+        # Common dict-like shapes from agent runtimes
+        if isinstance(resp, dict):
+            for key in ("final", "final_answer", "final_output", "answer", "output", "text", "content", "result"):
+                v = resp.get(key)
+                if isinstance(v, str) and v.strip():
+                    return v
+            # some agents return { "messages": [ { "content": "..."}, ... ] }
+            msgs = resp.get("messages") or resp.get("conversation") or resp.get("history")
+            if isinstance(msgs, list):
+                parts = []
+                for m in msgs:
+                    c = (m.get("content") if isinstance(m, dict) else None)
+                    if isinstance(c, str):
+                        parts.append(c)
+                if parts:
+                    return "\n".join(parts)
+            # last resort: string-ify
+            return str(resp)
+
+        # list of message dicts
+        if isinstance(resp, list):
+            parts = []
+            for m in resp:
+                if isinstance(m, dict) and isinstance(m.get("content"), str):
+                    parts.append(m["content"])
+            if parts:
+                return "\n".join(parts)
+            return str(resp)
+
+        return str(resp)
+
+    
     def analyze(
         self,
         contract_path: str,
@@ -339,61 +421,87 @@ class AIAnalyzer:
             # Clear agent state
             self.spoon_agent.clear()
             
-            # Build analysis prompt
-            if hasattr(self.spoon_agent, 'avaliable_tools') and any(tool.name == "security_analysis" for tool in self.spoon_agent.avaliable_tools.tools):
-                # Use custom tool for SpoonContractAgent
-                prompt = f"""Analyze the smart contract '{contract_name}' for security vulnerabilities.
-
-                Use the security_analysis tool with the following parameters:
-                - contract_code: The provided source code
-                - contract_name: {contract_name}
-                - static_findings: {static_summary}
-                - analysis_depth: thorough
-
-                Source code:
-                {code_snippet}
-
-                Focus on critical security issues and provide detailed findings."""
-            else:
-                # Direct analysis for standard agents
-                prompt = f"""Analyze this Solidity contract '{contract_name}' for security vulnerabilities:
-
-                STATIC ANALYSIS RESULTS:
-                {static_summary}
-
-                CONTRACT SOURCE CODE:
-                ```solidity
-                {code_snippet}
-                ```
-
-                Analyze for:
-                1. Reentrancy vulnerabilities
-                2. Access control issues
-                3. Integer overflow/underflow
-                4. Unchecked external calls
-                5. Gas optimization issues
-                6. Logic errors
-
-                Respond with a JSON array of findings. Each finding should have:
-                - severity: "critical", "high", "medium", "low", or "info"
-                - title: Brief descriptive title
-                - description: Detailed explanation
-                - location: File location or function name
-                - confidence: Float between 0.0-1.0
-                - reasoning: Why this is a vulnerability
-                - suggested_fix: How to fix it
-
-                Return ONLY the JSON array."""
-
-            # Run agent analysis
-            if hasattr(self.spoon_agent, 'run_sync'):
-                response = self.spoon_agent.run_sync(prompt)
-            else:
-                import asyncio
-                response = asyncio.run(self.spoon_agent.run(prompt))
             
+            # Build analysis prompt
+            prompt = f"""You are an expert Solidity security auditor. Your task is to analyze the provided smart contract and return a JSON array of security findings.
+
+CONTRACT TO ANALYZE: {contract_name}
+
+STATIC ANALYSIS CONTEXT:
+{static_summary}
+
+CONTRACT SOURCE CODE:
+```solidity
+{code_snippet}
+```
+
+ANALYSIS REQUIREMENTS:
+1. Identify security vulnerabilities (reentrancy, access control, overflow/underflow, etc.)
+2. Check for gas optimization issues
+3. Look for logic errors and edge cases
+4. Identify best practice violations
+
+OUTPUT REQUIREMENTS:
+- Return ONLY a JSON array of findings
+- Each finding must be a JSON object with these exact fields:
+  * "severity": one of "critical", "high", "medium", "low", or "info"
+  * "title": brief descriptive title
+  * "description": detailed explanation of the issue
+  * "location": file location or function name
+  * "confidence": number between 0.0 and 1.0
+  * "reasoning": why this is a vulnerability
+  * "suggested_fix": how to fix it (can be null)
+
+EXAMPLE OUTPUT FORMAT:
+[
+  {{
+    "severity": "high",
+    "title": "Reentrancy vulnerability in withdraw function",
+    "description": "The withdraw function makes external calls before updating state variables, allowing for reentrancy attacks",
+    "location": "{contract_name}:withdraw",
+    "confidence": 0.9,
+    "reasoning": "External call occurs before balance update, classic reentrancy pattern",
+    "suggested_fix": "Move state updates before external calls following checks-effects-interactions pattern"
+  }}
+]
+
+If no vulnerabilities are found, return an empty array: []
+
+Begin your analysis now and return ONLY the JSON array."""
+            # Run agent analysis
+            # if hasattr(self.spoon_agent, 'run_sync'):
+            #     response = self.spoon_agent.run_sync(prompt)
+            raw = self._arun(self.spoon_agent.run(prompt))
+            response = self._to_text(raw)
+            # else:
+            #     import asyncio
+            #     response = asyncio.run(self.spoon_agent.run(prompt))
+            if self.debug:
+                try:
+                    import inspect
+                    print("[ai] Spoon raw type:", type(raw))
+                    if isinstance(raw, dict):
+                        print("[ai] Spoon raw keys:", list(raw.keys()))
+                except Exception:
+                    pass
+            response = self._to_text(raw)
+            if self.debug:
+                print("[ai] Spoon raw response (truncated):", response[:400])
             # Parse response
             findings = self._parse_agent_response(response)
+            if not findings:
+                direct_prompt = f"""Please analyze this Solidity contract and find security vulnerabilities:
+
+{code_snippet}
+
+Respond with JSON array format like this:
+[{{"severity": "high", "title": "Issue name", "description": "Issue details", "location": "function name", "confidence": 0.8, "reasoning": "why it's an issue", "suggested_fix": "how to fix"}}]"""
+                raw2 = self._arun(self.spoon_agent.run(direct_prompt))
+                response2 = self._to_text(raw2)
+                if self.debug:
+                    print("[ai] Spoon strict response (truncated):", response2[:400])
+                findings = self._parse_agent_response(response2)
+                
             return findings
             
         except Exception as e:
@@ -403,6 +511,7 @@ class AIAnalyzer:
                 traceback.print_exc()
             return []
 
+    
     def _parse_agent_response(self, response: str) -> List[AIFinding]:
         """Parse response from SpoonOS agent"""
         findings = []
@@ -410,38 +519,112 @@ class AIAnalyzer:
         try:
             # Try to extract JSON from response
             response = response.strip()
+
+            if self.debug:
+                print(f"[ai] Parsing response length: {len(response)}")
+                print(f"[ai] Response preview: {response[:200]}...")
+
+            json_candidates = []    
+            import re
+            json_pattern = r'\[(?:[^[\]]*(?:\[[^\]]*\])?)*[^[\]]*\]'
+            matches = re.findall(json_pattern, response, re.DOTALL)
+
+            for match in matches:
+                try:
+                    test_data = json.loads(match)
+                    if isinstance(test_data, list):
+                        json_candidates.append(match)
+                except:
+                    continue
+
+            if not json_candidates:    
+                start = response.find("[")
+                end = response.rfind("]") + 1        
             
             # Look for JSON array in response
-            start = response.find("[")
-            end = response.rfind("]") + 1
-            
-            if start != -1 and end > start:
-                json_str = response[start:end]
-                data = json.loads(json_str)
-                
-                if isinstance(data, list):
-                    for item in data:
-                        if isinstance(item, dict):
-                            findings.append(AIFinding(
-                                severity=item.get("severity", "medium").lower(),
-                                title=item.get("title", "Security Issue"),
-                                description=item.get("description", ""),
-                                location=item.get("location", "Unknown"),
-                                confidence=float(item.get("confidence", 0.5)),
-                                reasoning=item.get("reasoning", ""),
-                                suggested_fix=item.get("suggested_fix")
-                            ))
-            else:
-                # Fallback: extract structured information from text
+                if start != -1 and end > start:
+                    candidate = response[start:end]
+                    try:
+                        test_data = json.loads(candidate)
+                        if isinstance(test_data, list):
+                            json_candidates.append(candidate)
+                    except:
+                        pass
+
+            if not json_candidates:
+                json_blocks = re.findall(r'```(?:json)?\s*(\[.*?\])\s*```', response, re.DOTALL | re.IGNORECASE)
+                for block in json_blocks:
+                    try:
+                        test_data = json.loads(block)
+                        if isinstance(test_data, list):
+                            json_candidates.append(block)
+                    except:
+                        continue
+
+            for json_str in json_candidates:
+                try:
+                    data = json.loads(json_str)
+                    if isinstance(data, list):
+                        for item in data:
+                            if isinstance(item, dict):
+                                required_fields = ['severity', 'title', 'description', 'location', 'confidence', 'reasoning']
+                            if all(field in item for field in required_fields):
+                                findings.append(AIFinding(
+                                    severity=str(item.get("severity", "medium")).lower(),
+                                    title=str(item.get("title", "Security Issue")),
+                                    description=str(item.get("description", "")),
+                                    location=str(item.get("location", "Unknown")),
+                                    confidence=float(item.get("confidence", 0.5)),
+                                    reasoning=str(item.get("reasoning", "")),
+                                    suggested_fix=item.get("suggested_fix")
+                                ))
+                            
+                        break
+                except (json.JSONDecodeError, ValueError, TypeError) as e:
+                    if self.debug:
+                        print(f"[ai] JSON parse error for candidate: {e}")
+                    continue             
+            if not findings:
+                if self.debug:
+                    print("[ai] JSON parsing failed, trying text extraction")
                 findings = self._extract_findings_from_text(response)
-                
-        except (json.JSONDecodeError, ValueError) as e:
+        except Exception as e:
             if self.debug:
-                print(f"[ai] Failed to parse agent response as JSON: {e}")
+                print(f"[ai] Failed to parse agent response: {e}")
                 print(f"[ai] Response: {response[:500]}...")
+        if self.debug:
+            print(f"[ai] Extracted {len(findings)} findings")                    
+
+
+            
+            
+        #     if start != -1 and end > start:
+        #         json_str = response[start:end]
+        #         data = json.loads(json_str)
+                
+        #         if isinstance(data, list):
+        #             for item in data:
+        #                 if isinstance(item, dict):
+        #                     findings.append(AIFinding(
+        #                         severity=item.get("severity", "medium").lower(),
+        #                         title=item.get("title", "Security Issue"),
+        #                         description=item.get("description", ""),
+        #                         location=item.get("location", "Unknown"),
+        #                         confidence=float(item.get("confidence", 0.5)),
+        #                         reasoning=item.get("reasoning", ""),
+        #                         suggested_fix=item.get("suggested_fix")
+        #                     ))
+        #     else:
+        #         # Fallback: extract structured information from text
+        #         findings = self._extract_findings_from_text(response)
+                
+        # except (json.JSONDecodeError, ValueError) as e:
+        #     if self.debug:
+        #         print(f"[ai] Failed to parse agent response as JSON: {e}")
+        #         print(f"[ai] Response: {response[:500]}...")
             
             # Fallback to text parsing
-            findings = self._extract_findings_from_text(response)
+            # findings = self._extract_findings_from_text(response)
         
         return findings
 

@@ -1,6 +1,6 @@
 {
   "path": "contracts/VulnerableContract.sol",
-  "timestamp": 1754497500,
+  "timestamp": 1754515294,
   "contracts": [
     {
       "name": "VulnerableContract",
@@ -139,76 +139,5 @@
       "contract": ""
     }
   ],
-  "ai": [
-    {
-      "severity": "high",
-      "title": "Reentrancy vulnerability in withdraw function",
-      "description": "The withdraw function makes external calls before updating state, allowing for reentrancy attacks.",
-      "location": "VulnerableContract:25-30",
-      "confidence": 0.9,
-      "reasoning": "External call to user.call{value: amount}() occurs before balance update.",
-      "suggested_fix": "Use checks-effects-interactions pattern: update state before external calls.",
-      "contract": ""
-    },
-    {
-      "severity": "high",
-      "title": "Use of tx.origin for authorization",
-      "description": "The emergencyWithdraw function uses tx.origin for authorization, which can lead to phishing attacks.",
-      "location": "VulnerableContract:45-50",
-      "confidence": 0.95,
-      "reasoning": "Using tx.origin allows any contract that the owner interacts with to call this function, compromising security.",
-      "suggested_fix": "Replace tx.origin with msg.sender for authorization checks.",
-      "contract": ""
-    },
-    {
-      "severity": "medium",
-      "title": "Block timestamp dependency in timeLock function",
-      "description": "The timeLock function relies on block.timestamp, which can be manipulated by miners.",
-      "location": "VulnerableContract:52-54",
-      "confidence": 0.8,
-      "reasoning": "Miners can influence the block timestamp, potentially allowing them to bypass the time lock.",
-      "suggested_fix": "Avoid using block.timestamp for critical logic; consider using block.number instead.",
-      "contract": ""
-    },
-    {
-      "severity": "medium",
-      "title": "Unchecked external call in unsafeTransfer function",
-      "description": "The unsafeTransfer function does not check the return value of the external call, which can lead to silent failures.",
-      "location": "VulnerableContract:57-59",
-      "confidence": 0.85,
-      "reasoning": "If the call fails, the contract state may not reflect the intended changes, leading to potential loss of funds.",
-      "suggested_fix": "Check the return value of the external call and handle failures appropriately.",
-      "contract": ""
-    },
-    {
-      "severity": "low",
-      "title": "Denial of Service with gas limit in massTransfer function",
-      "description": "The massTransfer function can run out of gas if the recipients array is too large, leading to a denial of service.",
-      "location": "VulnerableContract:68-70",
-      "confidence": 0.75,
-      "reasoning": "Unbounded loops can cause transactions to fail if they exceed the gas limit.",
-      "suggested_fix": "Implement batching or limit the number of recipients in a single call.",
-      "contract": ""
-    },
-    {
-      "severity": "low",
-      "title": "Missing zero-check in deposit function",
-      "description": "The deposit function does not check if msg.value is zero, which could lead to unnecessary state changes.",
-      "location": "VulnerableContract:75-77",
-      "confidence": 0.7,
-      "reasoning": "Allowing zero deposits can clutter the state and may lead to confusion.",
-      "suggested_fix": "Add a require statement to check that msg.value is greater than zero.",
-      "contract": ""
-    },
-    {
-      "severity": "low",
-      "title": "Access control issue in changeOwner function",
-      "description": "The changeOwner function lacks an access control modifier, allowing anyone to change the owner.",
-      "location": "VulnerableContract:81-83",
-      "confidence": 0.9,
-      "reasoning": "Without proper access control, any user can change the contract's ownership.",
-      "suggested_fix": "Add the onlyOwner modifier to the changeOwner function.",
-      "contract": ""
-    }
-  ]
+  "ai": []
 }
