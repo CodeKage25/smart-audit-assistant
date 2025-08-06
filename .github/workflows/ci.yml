@@ -36,8 +36,8 @@ jobs:
       - name: Show Python version
         run: python -V
 
-      - name: Run pre-commit (black, flake8, mypy & sanity hooks)
-        run: pre-commit run --all-files
+      - name: Run pre-commit (check-only on push stage)
+        run: pre-commit run --all-files --hook-stage push --show-diff-on-failure
 
       - name: Run tests with coverage
         run: |
