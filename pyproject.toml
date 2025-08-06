@@ -74,9 +74,9 @@ mythril = [
 ]
 
 [project.urls]
-"Homepage"    = "https://github.com/yourusername/spoon-audit"
-"Bug Reports" = "https://github.com/yourusername/spoon-audit/issues"
-"Source"      = "https://github.com/yourusername/spoon-audit"
+"Homepage"    = "https://github.com/CodeKage25/spoon-audit"
+"Bug Reports" = "https://github.com/CodeKage25/spoon-audit/issues"
+"Source"      = "https://github.com/CodeKage25/spoon-audit"
 
 [project.scripts]
 spoon-audit = "cli.main:main"
