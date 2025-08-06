@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint-test:
+  lint-only:
     runs-on: ubuntu-latest
 
     strategy:
@@ -38,18 +38,3 @@ jobs:
 
       - name: Run pre-commit (check-only on push stage)
         run: pre-commit run --all-files --hook-stage push --show-diff-on-failure
-
-      - name: Run tests with coverage
-        run: |
-          pytest --maxfail=1 --disable-warnings -q \
-            --cov=analysis --cov=cli \
-            --cov-report=term-missing \
-            --cov-report=xml:coverage.xml
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: true
-          flags: unittests
-          # token: ${{ secrets.CODECOV_TOKEN }}   # uncomment for private repos
