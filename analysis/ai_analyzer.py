@@ -1,5 +1,6 @@
 """
 Pipeline Manager - Advanced AI Pipeline Architecture for Smart Contract Analysis
+Enhanced with SpoonOS Agent Integration
 """
 
 import os
@@ -40,13 +41,20 @@ except ImportError:
         openai = None
         OPENAI_V1 = False
 
-
+# Try to import SpoonOS components
+SPOON_AVAILABLE = False
 try:
+    # Preferred: package often exposes underscore name for hyphenated PyPI package
     from spoon_ai.chat import ChatBot
-    from spoon_ai.agents import SpoonReactAI
+    from spoon_ai.agents import SpoonReactAI, SpoonReactMCP, ToolCallAgent
+    from spoon_ai.tools.base import BaseTool
+    from spoon_ai.tools import ToolManager
     SPOON_AVAILABLE = True
 except ImportError:
-    SPOON_AVAILABLE = False
+        ChatBot = None
+        ToolCallAgent = object
+        ToolManager = None
+        BaseTool = object
 
 from analysis.parser import SolidityParser, ParsedContract
 from analysis.static_scanner import StaticScanner, StaticFinding
@@ -73,6 +81,7 @@ class PipelineConfig:
     max_workers: int = 4
     ai_models: List[str] = None
     static_tools: List[str] = None
+    spoon_agent_type: str = "react"  # react, spoon_react_mcp
     
     def __post_init__(self):
         if self.ai_models is None:
@@ -80,23 +89,137 @@ class PipelineConfig:
         if self.static_tools is None:
             self.static_tools = ["slither", "mythril", "solhint"]
 
+# SpoonOS Security Analysis Tool
+class SpoonSecurityTool(BaseTool):
+    """Custom tool for security analysis within SpoonOS agents"""
+    
+    name: str = "security_analysis"
+    description: str = "Analyze smart contracts for security vulnerabilities"
+    parameters: dict = {
+        "type": "object",
+        "properties": {
+            "contract_code": {
+                "type": "string",
+                "description": "The smart contract source code to analyze"
+            },
+            "contract_name": {
+                "type": "string",
+                "description": "Name of the contract being analyzed"
+            },
+            "static_findings": {
+                "type": "string",
+                "description": "Static analysis results as context"
+            },
+            "analysis_depth": {
+                "type": "string",
+                "enum": ["basic", "thorough", "comprehensive"],
+                "description": "Depth of analysis to perform"
+            }
+        },
+        "required": ["contract_code", "contract_name"]
+    }
+
+    async def execute(
+        self, 
+        contract_code: str, 
+        contract_name: str, 
+        static_findings: str = "", 
+        analysis_depth: str = "thorough"
+    ) -> str:
+        """Execute security analysis"""
+        
+        # Define analysis prompts based on depth
+        analysis_prompts = {
+            "basic": "Identify critical security vulnerabilities only",
+            "thorough": "Perform comprehensive security analysis including gas optimization",
+            "comprehensive": "Deep security analysis with attack vectors and complex scenarios"
+        }
+        
+        prompt = f"""
+        Analyze this Solidity contract for security vulnerabilities:
+
+        CONTRACT: {contract_name}
+        ANALYSIS DEPTH: {analysis_depth.upper()}
+        FOCUS: {analysis_prompts.get(analysis_depth, "Standard analysis")}
+
+        STATIC ANALYSIS CONTEXT:
+        {static_findings if static_findings else "No static analysis available"}
+
+        SOURCE CODE:
+        ```solidity
+        {contract_code[:2500]}  # Limit to prevent token overflow
+        ```
+
+        Identify:
+        1. Security vulnerabilities (reentrancy, access control, overflow)
+        2. Gas optimization opportunities
+        3. Logic errors and edge cases
+        4. Best practice violations
+
+        Return findings as JSON array with severity, title, description, location, confidence, reasoning, and suggested_fix.
+        """
+        
+        return prompt  # Return the analysis prompt - the agent will process this
+
+class SpoonContractAgent(ToolCallAgent):
+    """Custom SpoonOS agent specialized for smart contract analysis"""
+    
+    name: str = "contract_analyzer"
+    description: str = "AI agent specialized in smart contract security analysis"
+    
+    system_prompt: str = """You are an expert Solidity security auditor and smart contract analyst.
+    You have deep knowledge of:
+    - Smart contract vulnerabilities and attack vectors
+    - Gas optimization techniques
+    - Solidity best practices and design patterns
+    - DeFi protocols and common pitfalls
+    - MEV and front-running protection
+
+    When analyzing contracts, provide detailed, actionable findings with:
+    - Clear severity levels (critical, high, medium, low, info)
+    - Specific locations and line references
+    - Technical explanations of vulnerabilities
+    - Concrete remediation steps
+    - Confidence scores for each finding
+
+    Always respond with valid JSON arrays containing finding objects."""
+
+    next_step_prompt: str = "What security analysis should I perform next?"
+    max_steps: int = 8
+
+    def __init__(self, llm=None, **kwargs):
+        # Set up available tools
+        from pydantic import Field
+        
+        available_tools = ToolManager([
+            SpoonSecurityTool(),
+        ])
+        
+        super().__init__(available_tools=available_tools, llm=llm, **kwargs)
+
 class AIAnalyzer:
     """
-    Orchestrates AI-powered vulnerability explanations.
-    Supports OpenAI direct API and OpenRouter proxy.
+    Enhanced AI analyzer supporting both direct OpenAI and SpoonOS agents.
     """
 
-    def __init__(self, debug: bool = False):
+    def __init__(self, debug: bool = False, use_spoon_agent: bool = False, spoon_agent_type: str = "react"):
         self.debug = debug
+        self.use_spoon_agent = use_spoon_agent
+        self.spoon_agent_type = spoon_agent_type
+        
+        # OpenAI configuration
         self.openai_key = os.getenv("OPENAI_API_KEY")
         self.base_url = os.getenv("BASE_URL", "https://api.openai.com/v1")
         self.model_name = os.getenv("MODEL_NAME", "gpt-4")
-        self.spoon_key = os.getenv("SPOON_API_KEY")
-        self.llm_provider = "openai"
-
-        # Initialize OpenAI client with custom base URL support
+        
+        # SpoonOS configuration
+        self.spoon_key = os.getenv("SPOON_API_KEY") or self.openai_key
+        self.spoon_model = os.getenv("SPOON_MODEL", "anthropic/claude-3-5-sonnet-20241022")
+        self.spoon_base_url = os.getenv("SPOON_BASE_URL", "https://openrouter.ai/api/v1")
+        
+        # Initialize OpenAI client
         self.openai_client = None
-        if self.openai_key:
+        if self.openai_key and not use_spoon_agent:
             if OPENAI_V1:
                 self.openai_client = OpenAI(
                     api_key=self.openai_key,
@@ -107,14 +230,36 @@ class AIAnalyzer:
                 if self.base_url != "https://api.openai.com/v1":
                     openai.api_base = self.base_url
                 self.openai_client = openai
+
+        # Initialize SpoonOS agent
+        self.spoon_agent = None
+        if use_spoon_agent and SPOON_AVAILABLE and self.spoon_key:
+            try:
+                llm = ChatBot(
+                    llm_provider="openai",  # Provider for SpoonOS
+                    model_name=self.spoon_model,
+                    api_key=self.spoon_key,
+                    base_url=self.spoon_base_url
+                )
+                
+                if spoon_agent_type == "spoon_react_mcp":
+                    self.spoon_agent = SpoonReactMCP(llm=llm, debug=debug)
+                elif spoon_agent_type == "custom":
+                    self.spoon_agent = SpoonContractAgent(llm=llm, debug=debug)
+                else:  # Default to react
+                    self.spoon_agent = SpoonReactAI(llm=llm, debug=debug)
+                    
+            except Exception as e:
+                if debug:
+                    print(f"[ai] Failed to initialize SpoonOS agent: {e}")
+                self.spoon_agent = None
         
         if debug:
             print(f"[ai] OpenAI available: {bool(self.openai_client)}")
-            print(f"[ai] OpenAI version: {'v1+' if OPENAI_V1 else 'legacy'}")
-            print(f"[ai] Base URL: {self.base_url}")
-            print(f"[ai] Model: {self.model_name}")
             print(f"[ai] SpoonOS available: {SPOON_AVAILABLE}")
-            print(f"[ai] SpoonOS key set: {bool(self.spoon_key)}")
+            print(f"[ai] SpoonOS agent initialized: {bool(self.spoon_agent)}")
+            print(f"[ai] Using SpoonOS: {use_spoon_agent}")
+            print(f"[ai] SpoonOS agent type: {spoon_agent_type}")
 
     def analyze(
         self,
@@ -124,16 +269,34 @@ class AIAnalyzer:
     ) -> List[AIFinding]:
         findings: List[AIFinding] = []
 
-        # Prepare a snippet of the source for context
-        snippet = parsed.source_code[:2000]  # Increased snippet size
+        # Prepare contract snippet and static context
+        snippet = parsed.source_code[:2500]
+        static_summary = "\n".join(
+            f"- [{f.severity.upper()}] {f.title} at {f.location}: {f.tool}"
+            for bucket in static_results.values() for f in bucket
+        ) or "No static findings detected."
 
-        # 1. Direct OpenAI/OpenRouter analysis
-        if self.openai_client:
+        # Use SpoonOS agent if configured
+        if self.use_spoon_agent and self.spoon_agent:
+            try:
+                spoon_findings = self._analyze_with_spoon_agent(
+                    parsed.name, snippet, static_summary
+                )
+                findings.extend(spoon_findings)
+                if self.debug:
+                    print(f"[ai] SpoonOS agent found {len(spoon_findings)} issues")
+            except Exception as e:
+                if self.debug:
+                    print(f"[ai] SpoonOS agent error: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+        # Fallback to direct OpenAI if SpoonOS fails or not configured
+        if not findings and self.openai_client:
             try:
                 prompt = self._build_prompt(parsed.name, snippet, static_results)
                 
                 if OPENAI_V1:
-                    # New OpenAI v1+ API
                     resp = self.openai_client.chat.completions.create(
                         model=self.model_name,
                         messages=[
@@ -145,7 +308,6 @@ class AIAnalyzer:
                     )
                     content = resp.choices[0].message.content
                 else:
-                    # Legacy OpenAI API
                     resp = self.openai_client.ChatCompletion.create(
                         model=self.model_name,
                         messages=[
@@ -161,84 +323,166 @@ class AIAnalyzer:
                 findings.extend(ai_findings)
                 if self.debug:
                     print(f"[ai] OpenAI found {len(ai_findings)} issues")
-                    print(f"[ai] Raw response preview: {content[:200]}...")
+                    
             except Exception as e:
                 if self.debug:
                     print(f"[ai] OpenAI error: {e}")
-                    import traceback
-                    traceback.print_exc()
-
-        # 2. SpoonOS Agent analysis via SDK (if available)
-        if SPOON_AVAILABLE and self.spoon_key:
-            try:
-                spoon_findings = self._analyze_with_spoon(parsed, static_results, snippet)
-                findings.extend(spoon_findings)
-                if self.debug:
-                    print(f"[ai] SpoonOS found {len(spoon_findings)} additional issues")
-            except Exception as e:
-                if self.debug:
-                    print(f"[ai] SpoonOS Agent error: {e}")
-        elif self.debug and not SPOON_AVAILABLE:
-            print("[ai] SpoonOS SDK not installed, skipping agent analysis")
 
         return findings
 
-    def _analyze_with_spoon(
-        self, 
-        parsed: ParsedContract, 
-        static_results: Dict[str, List[StaticFinding]], 
-        snippet: str
-    ) -> List[AIFinding]:
+    def _analyze_with_spoon_agent(self, contract_name: str, code_snippet: str, static_summary: str) -> List[AIFinding]:
         """Analyze using SpoonOS agent"""
-        bot = SpoonReactAI(
-            llm=ChatBot(
-                llm_provider="openai",
-                model_name=os.getenv("SPOON_MODEL", "anthropic/claude-3-5-sonnet-20241022"),
-                api_key=self.spoon_key,
-                base_url=os.getenv("SPOON_BASE_URL", "https://openrouter.ai/api/v1")
-            ),
-            debug=self.debug
-        )
-
-        prompt = self._build_prompt(parsed.name, snippet, static_results)
-        # run_sync returns the agent's textual response
-        response = bot.run_sync(prompt)
+        if not self.spoon_agent:
+            return []
         
-        # Try to parse JSON response
         try:
-            data = json.loads(response)
-            return self._parse_spoon_response(data.get("findings", []))
-        except json.JSONDecodeError:
-            return self._extract_findings_from_text(response)
+            # Clear agent state
+            self.spoon_agent.clear()
+            
+            # Build analysis prompt
+            if hasattr(self.spoon_agent, 'avaliable_tools') and any(tool.name == "security_analysis" for tool in self.spoon_agent.avaliable_tools.tools):
+                # Use custom tool for SpoonContractAgent
+                prompt = f"""Analyze the smart contract '{contract_name}' for security vulnerabilities.
+
+                Use the security_analysis tool with the following parameters:
+                - contract_code: The provided source code
+                - contract_name: {contract_name}
+                - static_findings: {static_summary}
+                - analysis_depth: thorough
+
+                Source code:
+                {code_snippet}
+
+                Focus on critical security issues and provide detailed findings."""
+            else:
+                # Direct analysis for standard agents
+                prompt = f"""Analyze this Solidity contract '{contract_name}' for security vulnerabilities:
+
+                STATIC ANALYSIS RESULTS:
+                {static_summary}
+
+                CONTRACT SOURCE CODE:
+                ```solidity
+                {code_snippet}
+                ```
+
+                Analyze for:
+                1. Reentrancy vulnerabilities
+                2. Access control issues
+                3. Integer overflow/underflow
+                4. Unchecked external calls
+                5. Gas optimization issues
+                6. Logic errors
+
+                Respond with a JSON array of findings. Each finding should have:
+                - severity: "critical", "high", "medium", "low", or "info"
+                - title: Brief descriptive title
+                - description: Detailed explanation
+                - location: File location or function name
+                - confidence: Float between 0.0-1.0
+                - reasoning: Why this is a vulnerability
+                - suggested_fix: How to fix it
+
+                Return ONLY the JSON array."""
+
+            # Run agent analysis
+            if hasattr(self.spoon_agent, 'run_sync'):
+                response = self.spoon_agent.run_sync(prompt)
+            else:
+                import asyncio
+                response = asyncio.run(self.spoon_agent.run(prompt))
+            
+            # Parse response
+            findings = self._parse_agent_response(response)
+            return findings
+            
+        except Exception as e:
+            if self.debug:
+                print(f"[ai] SpoonOS agent analysis failed: {e}")
+                import traceback
+                traceback.print_exc()
+            return []
+
+    def _parse_agent_response(self, response: str) -> List[AIFinding]:
+        """Parse response from SpoonOS agent"""
+        findings = []
+        
+        try:
+            # Try to extract JSON from response
+            response = response.strip()
+            
+            # Look for JSON array in response
+            start = response.find("[")
+            end = response.rfind("]") + 1
+            
+            if start != -1 and end > start:
+                json_str = response[start:end]
+                data = json.loads(json_str)
+                
+                if isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict):
+                            findings.append(AIFinding(
+                                severity=item.get("severity", "medium").lower(),
+                                title=item.get("title", "Security Issue"),
+                                description=item.get("description", ""),
+                                location=item.get("location", "Unknown"),
+                                confidence=float(item.get("confidence", 0.5)),
+                                reasoning=item.get("reasoning", ""),
+                                suggested_fix=item.get("suggested_fix")
+                            ))
+            else:
+                # Fallback: extract structured information from text
+                findings = self._extract_findings_from_text(response)
+                
+        except (json.JSONDecodeError, ValueError) as e:
+            if self.debug:
+                print(f"[ai] Failed to parse agent response as JSON: {e}")
+                print(f"[ai] Response: {response[:500]}...")
+            
+            # Fallback to text parsing
+            findings = self._extract_findings_from_text(response)
+        
+        return findings
 
     def _extract_findings_from_text(self, text: str) -> List[AIFinding]:
         """Extract findings from natural language response"""
         findings = []
-        # This is a simple extraction - you might want to make it more sophisticated
         lines = text.split('\n')
         current_finding = {}
         
         for line in lines:
             line = line.strip()
-            if line.startswith('Severity:'):
+            if any(line.startswith(prefix) for prefix in ['Severity:', '**Severity:', 'SEVERITY:']):
                 current_finding['severity'] = line.split(':', 1)[1].strip().lower()
-            elif line.startswith('Title:'):
+            elif any(line.startswith(prefix) for prefix in ['Title:', '**Title:', 'TITLE:']):
                 current_finding['title'] = line.split(':', 1)[1].strip()
-            elif line.startswith('Description:'):
+            elif any(line.startswith(prefix) for prefix in ['Description:', '**Description:', 'DESCRIPTION:']):
                 current_finding['description'] = line.split(':', 1)[1].strip()
-            elif line.startswith('Location:'):
+            elif any(line.startswith(prefix) for prefix in ['Location:', '**Location:', 'LOCATION:']):
                 current_finding['location'] = line.split(':', 1)[1].strip()
             elif line.startswith('---') and current_finding:
                 # End of finding
                 findings.append(AIFinding(
                     severity=current_finding.get('severity', 'medium'),
-                    title=current_finding.get('title', 'Unknown Issue'),
+                    title=current_finding.get('title', 'Security Issue'),
                     description=current_finding.get('description', ''),
                     location=current_finding.get('location', ''),
                     confidence=0.7,
                     reasoning="Extracted from SpoonOS agent response"
                 ))
                 current_finding = {}
+        
+        # Handle last finding if no closing ---
+        if current_finding:
+            findings.append(AIFinding(
+                severity=current_finding.get('severity', 'medium'),
+                title=current_finding.get('title', 'Security Issue'),
+                description=current_finding.get('description', ''),
+                location=current_finding.get('location', ''),
+                confidence=0.7,
+                reasoning="Extracted from SpoonOS agent response"
+            ))
         
         return findings
 
@@ -357,22 +601,8 @@ IMPORTANT: Return ONLY the JSON array, no additional text."""
                 traceback.print_exc()
         return findings
 
-    def _parse_spoon_response(self, data: List[Dict[str, Any]]) -> List[AIFinding]:
-        findings: List[AIFinding] = []
-        for item in data:
-            findings.append(AIFinding(
-                severity=item.get("severity", "medium").lower(),
-                title=item.get("title", ""),
-                description=item.get("description", ""),
-                location=item.get("location", ""),
-                confidence=float(item.get("confidence", 0.5)),
-                reasoning=item.get("reasoning", ""),
-                suggested_fix=item.get("suggested_fix")
-            ))
-        return findings
-
 class PipelineManager:
-    """Pipeline manager for smart contract analysis"""
+    """Pipeline manager for smart contract analysis with SpoonOS integration"""
     
     def __init__(self, debug: bool = False):
         self.debug = debug
@@ -380,7 +610,7 @@ class PipelineManager:
         self.cache_dir = Path("~/.spoon-audit/cache").expanduser()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
-        # Initialize pipeline configurations
+        # Initialize pipeline configurations with SpoonOS support
         self.pipelines = {
             "fast": PipelineConfig(
                 name="fast",
@@ -390,7 +620,8 @@ class PipelineManager:
                 timeout_seconds=60,
                 max_workers=2,
                 ai_models=[],
-                static_tools=["solhint"]
+                static_tools=["solhint"],
+                spoon_agent_type="react"
             ),
             "thorough": PipelineConfig(
                 name="thorough",
@@ -400,7 +631,8 @@ class PipelineManager:
                 timeout_seconds=300,
                 max_workers=4,
                 ai_models=["gpt-4"],
-                static_tools=["slither", "mythril", "solhint"]
+                static_tools=["slither", "mythril", "solhint"],
+                spoon_agent_type="react"
             ),
             "ai-enhanced": PipelineConfig(
                 name="ai-enhanced",
@@ -410,7 +642,30 @@ class PipelineManager:
                 timeout_seconds=600,
                 max_workers=6,
                 ai_models=["gpt-4", "claude-3-sonnet", "llama-3.1-70b"],
-                static_tools=["slither", "mythril", "solhint", "semgrep"]
+                static_tools=["slither", "mythril", "solhint", "semgrep"],
+                spoon_agent_type="react"
+            ),
+            "spoon-powered": PipelineConfig(
+                name="spoon-powered",
+                description="SpoonOS agent-driven analysis with MCP support",
+                stages=["parse", "static_full", "spoon_analysis", "correlate", "cache"],
+                parallel_stages=True,
+                timeout_seconds=450,
+                max_workers=4,
+                ai_models=["claude-3-sonnet"],
+                static_tools=["slither", "mythril", "solhint"],
+                spoon_agent_type="spoon_react_mcp"
+            ),
+            "custom-agent": PipelineConfig(
+                name="custom-agent",
+                description="Custom SpoonOS contract agent with specialized tools",
+                stages=["parse", "static_full", "custom_spoon_analysis", "correlate", "cache"],
+                parallel_stages=True,
+                timeout_seconds=400,
+                max_workers=4,
+                ai_models=["anthropic/claude-3-5-sonnet-20241022"],
+                static_tools=["slither", "mythril", "solhint"],
+                spoon_agent_type="custom"
             )
         }
         
@@ -421,6 +676,7 @@ class PipelineManager:
             self.logger.debug(f"Pipeline Manager initialized with {len(self.pipelines)} pipelines")
             self.logger.debug(f"ML analysis available: {SKLEARN_AVAILABLE}")
             self.logger.debug(f"PyTorch available: {TORCH_AVAILABLE}")
+            self.logger.debug(f"SpoonOS available: {SPOON_AVAILABLE}")
     
     def _setup_logging(self) -> logging.Logger:
         """Setup logging for pipeline manager"""
@@ -539,6 +795,10 @@ class PipelineManager:
             return await self._stage_ai_single(contract_paths, config, previous_results)
         elif stage == "ai_consensus":
             return await self._stage_ai_consensus(contract_paths, config, previous_results)
+        elif stage == "spoon_analysis":
+            return await self._stage_spoon_analysis(contract_paths, config, previous_results)
+        elif stage == "custom_spoon_analysis":
+            return await self._stage_custom_spoon_analysis(contract_paths, config, previous_results)
         elif stage == "ml_analysis":
             return await self._stage_ml_analysis(contract_paths, config, previous_results)
         elif stage == "correlate":
@@ -768,6 +1028,98 @@ class PipelineManager:
         
         return results
     
+    async def _stage_spoon_analysis(self, contract_paths: List[str], config: PipelineConfig, previous_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Run SpoonOS agent analysis"""
+        results = {"findings": {}, "agent_stats": {}}
+        
+        if not SPOON_AVAILABLE:
+            self.logger.warning("SpoonOS not available - skipping SpoonOS analysis")
+            return results
+        
+        try:
+            ai_analyzer = AIAnalyzer(
+                debug=self.debug, 
+                use_spoon_agent=True, 
+                spoon_agent_type=config.spoon_agent_type
+            )
+            
+            # Get parsed contracts from previous stage
+            parsed_contracts = previous_results.get("stages", {}).get("parse", {}).get("results", {}).get("parsed_contracts", {})
+            static_findings = previous_results.get("stages", {}).get("static_full", {}).get("results", {}).get("findings", {})
+            
+            for contract_path in contract_paths:
+                if contract_path not in parsed_contracts:
+                    continue
+                
+                try:
+                    parsed = parsed_contracts[contract_path]
+                    spoon_findings = ai_analyzer.analyze(contract_path, parsed, static_findings)
+                    if spoon_findings:
+                        results["findings"][contract_path] = spoon_findings
+                
+                except Exception as e:
+                    self.logger.warning(f"SpoonOS analysis failed for {contract_path}: {e}")
+                    continue
+            
+            results["agent_stats"] = {
+                "agent_type": config.spoon_agent_type,
+                "contracts_analyzed": len([p for p in contract_paths if p in parsed_contracts]),
+                "contracts_with_findings": len(results["findings"]),
+                "total_findings": sum(len(f) for f in results["findings"].values())
+            }
+            
+        except Exception as e:
+            self.logger.error(f"SpoonOS agent failed: {e}")
+            results["agent_stats"] = {"error": str(e)}
+        
+        return results
+    
+    async def _stage_custom_spoon_analysis(self, contract_paths: List[str], config: PipelineConfig, previous_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Run custom SpoonOS contract agent analysis"""
+        results = {"findings": {}, "agent_stats": {}}
+        
+        if not SPOON_AVAILABLE:
+            self.logger.warning("SpoonOS not available - skipping custom SpoonOS analysis")
+            return results
+        
+        try:
+            ai_analyzer = AIAnalyzer(
+                debug=self.debug, 
+                use_spoon_agent=True, 
+                spoon_agent_type="custom"
+            )
+            
+            # Get parsed contracts from previous stage
+            parsed_contracts = previous_results.get("stages", {}).get("parse", {}).get("results", {}).get("parsed_contracts", {})
+            static_findings = previous_results.get("stages", {}).get("static_full", {}).get("results", {}).get("findings", {})
+            
+            for contract_path in contract_paths:
+                if contract_path not in parsed_contracts:
+                    continue
+                
+                try:
+                    parsed = parsed_contracts[contract_path]
+                    custom_findings = ai_analyzer.analyze(contract_path, parsed, static_findings)
+                    if custom_findings:
+                        results["findings"][contract_path] = custom_findings
+                
+                except Exception as e:
+                    self.logger.warning(f"Custom SpoonOS analysis failed for {contract_path}: {e}")
+                    continue
+            
+            results["agent_stats"] = {
+                "agent_type": "custom_contract_agent",
+                "contracts_analyzed": len([p for p in contract_paths if p in parsed_contracts]),
+                "contracts_with_findings": len(results["findings"]),
+                "total_findings": sum(len(f) for f in results["findings"].values())
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Custom SpoonOS agent failed: {e}")
+            results["agent_stats"] = {"error": str(e)}
+        
+        return results
+    
     async def _stage_ml_analysis(self, contract_paths: List[str], config: PipelineConfig, previous_results: Dict[str, Any]) -> Dict[str, Any]:
         """Run machine learning analysis for pattern detection"""
         results = {"patterns": {}, "clusters": {}, "anomalies": {}}
@@ -783,7 +1135,17 @@ class PipelineManager:
             
             # Get findings from previous stages
             static_results = previous_results.get("stages", {}).get("static_full", {}).get("results", {}).get("findings", {})
-            ai_results = previous_results.get("stages", {}).get("ai_consensus", {}).get("results", {}).get("findings", {})
+            
+            # Check for different AI analysis stages
+            ai_results = {}
+            if "ai_consensus" in previous_results.get("stages", {}):
+                ai_results = previous_results["stages"]["ai_consensus"]["results"].get("findings", {})
+            elif "spoon_analysis" in previous_results.get("stages", {}):
+                ai_results = previous_results["stages"]["spoon_analysis"]["results"].get("findings", {})
+            elif "custom_spoon_analysis" in previous_results.get("stages", {}):
+                ai_results = previous_results["stages"]["custom_spoon_analysis"]["results"].get("findings", {})
+            elif "ai_single" in previous_results.get("stages", {}):
+                ai_results = previous_results["stages"]["ai_single"]["results"].get("findings", {})
             
             # Prepare data for ML analysis
             for contract_path in contract_paths:
@@ -831,7 +1193,14 @@ class PipelineManager:
         try:
             # Collect all findings
             static_findings = previous_results.get("stages", {}).get("static_full", {}).get("results", {}).get("findings", {})
-            ai_findings = previous_results.get("stages", {}).get("ai_consensus", {}).get("results", {}).get("findings", {})
+            
+            # Get AI findings from appropriate stage
+            ai_findings = {}
+            stage_priority = ["custom_spoon_analysis", "spoon_analysis", "ai_consensus", "ai_single"]
+            for stage in stage_priority:
+                if stage in previous_results.get("stages", {}):
+                    ai_findings = previous_results["stages"][stage]["results"].get("findings", {})
+                    break
             
             correlation_engine = FindingCorrelationEngine(debug=self.debug)
             
@@ -1113,7 +1482,8 @@ class PipelineManager:
             timeout_seconds=base_config.timeout_seconds,
             max_workers=base_config.max_workers,
             ai_models=base_config.ai_models.copy() if base_config.ai_models else [],
-            static_tools=base_config.static_tools.copy() if base_config.static_tools else []
+            static_tools=base_config.static_tools.copy() if base_config.static_tools else [],
+            spoon_agent_type=base_config.spoon_agent_type
         )
         
         # Apply custom configuration
@@ -1423,7 +1793,7 @@ class CacheManager:
                 content = f.read()
             
             # Create hash of content + config
-            config_str = f"{config.name}:{','.join(config.static_tools)}:{','.join(config.ai_models or [])}"
+            config_str = f"{config.name}:{','.join(config.static_tools)}:{','.join(config.ai_models or [])}:{config.spoon_agent_type}"
             combined = f"{content}:{config_str}"
             
             return hashlib.sha256(combined.encode()).hexdigest()[:16]
@@ -1506,171 +1876,6 @@ class CacheManager:
         return cleaned_count
 
 
-# Enhanced AI Analyzer with model configuration support
-class EnhancedAIAnalyzer(AIAnalyzer):
-    """Enhanced AI Analyzer with pipeline-specific features"""
-    
-    def __init__(self, debug: bool = False, pipeline: str = "thorough"):
-        super().__init__(debug=debug)
-        self.pipeline = pipeline
-        self.current_model_config = None
-    
-    def configure_model(self, model_config: Dict[str, Any]):
-        """Configure the AI model for analysis"""
-        self.current_model_config = model_config
-        
-        # Update model settings
-        if "model" in model_config:
-            self.model_name = model_config["model"]
-        if "provider" in model_config:
-            self.llm_provider = model_config["provider"]
-        if "base_url" in model_config:
-            self.base_url = model_config["base_url"]
-        
-        # Reinitialize client with new settings
-        self._reinitialize_client()
-    
-    def _reinitialize_client(self):
-        """Reinitialize the OpenAI client with current settings"""
-        if self.openai_key:
-            if OPENAI_V1:
-                self.openai_client = OpenAI(
-                    api_key=self.openai_key,
-                    base_url=self.base_url
-                )
-            elif openai:
-                openai.api_key = self.openai_key
-                if self.base_url != "https://api.openai.com/v1":
-                    openai.api_base = self.base_url
-                self.openai_client = openai
-    
-    def analyze_with_context(
-        self, 
-        contract_path: str, 
-        parsed: ParsedContract, 
-        static_results: Dict[str, List[StaticFinding]], 
-        additional_context: Dict[str, Any] = None
-    ) -> List[AIFinding]:
-        """Enhanced analysis with additional context"""
-        
-        # Build enhanced prompt with pipeline-specific instructions
-        enhanced_prompt = self._build_enhanced_prompt(
-            parsed.name, 
-            parsed.source_code[:3000],  # Larger snippet for enhanced analysis
-            static_results, 
-            additional_context or {}
-        )
-        
-        try:
-            if OPENAI_V1:
-                resp = self.openai_client.chat.completions.create(
-                    model=self.model_name,
-                    messages=[
-                        {"role": "system", "content": self._get_system_prompt()},
-                        {"role": "user", "content": enhanced_prompt}
-                    ],
-                    max_tokens=3000,  # More tokens for detailed analysis
-                    temperature=0.1
-                )
-                content = resp.choices[0].message.content
-            else:
-                resp = self.openai_client.ChatCompletion.create(
-                    model=self.model_name,
-                    messages=[
-                        {"role": "system", "content": self._get_system_prompt()},
-                        {"role": "user", "content": enhanced_prompt}
-                    ],
-                    max_tokens=3000,
-                    temperature=0.1
-                )
-                content = resp.choices[0].message.content
-            
-            return self._parse_openai_response(content)
-            
-        except Exception as e:
-            if self.debug:
-                print(f"Enhanced AI analysis failed: {e}")
-            return []
-    
-    def _get_system_prompt(self) -> str:
-        """Get system prompt based on pipeline type"""
-        base_prompt = "You are an expert Solidity security auditor with deep knowledge of smart contract vulnerabilities, gas optimization, and best practices."
-        
-        if self.pipeline == "fast":
-            return base_prompt + " Focus on the most critical security issues only."
-        elif self.pipeline == "thorough":
-            return base_prompt + " Provide comprehensive analysis including security, gas optimization, and code quality issues."
-        elif self.pipeline == "ai-enhanced":
-            return base_prompt + " Provide detailed analysis with high confidence scores, comprehensive reasoning, and specific remediation steps. Consider complex attack vectors and edge cases."
-        
-        return base_prompt
-    
-    def _build_enhanced_prompt(
-        self, 
-        contract_name: str, 
-        code_snippet: str, 
-        static_results: Dict[str, List[StaticFinding]], 
-        additional_context: Dict[str, Any]
-    ) -> str:
-        """Build enhanced prompt with additional context"""
-        
-        # Static analysis summary
-        static_summary = []
-        for tool, findings in static_results.items():
-            for finding_list in findings.values():
-                for finding in finding_list:
-                    static_summary.append(f"- [{finding.severity.upper()}] {finding.title} ({tool})")
-        
-        static_text = "\n".join(static_summary) if static_summary else "No static analysis findings."
-        
-        # Additional context
-        context_text = ""
-        if additional_context:
-            if "function_complexity" in additional_context:
-                context_text += f"\nFunction Complexity: {additional_context['function_complexity']}"
-            if "external_calls" in additional_context:
-                context_text += f"\nExternal Calls: {additional_context['external_calls']}"
-            if "state_variables" in additional_context:
-                context_text += f"\nState Variables: {additional_context['state_variables']}"
-        
-        return f"""Analyze this Solidity contract '{contract_name}' for security vulnerabilities, gas optimization opportunities, and code quality issues.
-
-PIPELINE: {self.pipeline.upper()}
-{context_text}
-
-STATIC ANALYSIS RESULTS:
-{static_text}
-
-CONTRACT SOURCE CODE:
-```solidity
-{code_snippet}
-```
-
-Focus on:
-1. Critical security vulnerabilities (reentrancy, access control, overflow/underflow)
-2. Gas optimization opportunities
-3. Logic errors and edge cases
-4. Best practice violations
-5. MEV vulnerabilities and front-running risks
-
-Provide detailed findings in JSON format with high-confidence assessments and specific remediation steps.
-
-Response format:
-[
-  {{
-    "severity": "critical|high|medium|low|info",
-    "title": "Clear, specific title",
-    "description": "Detailed technical explanation",
-    "location": "{contract_name}:line_number or function_name",
-    "confidence": 0.0-1.0,
-    "reasoning": "Detailed technical reasoning",
-    "suggested_fix": "Specific code fix or remediation steps"
-  }}
-]
-
-Return only the JSON array."""
-
-
 # Pipeline execution helper functions
 def create_pipeline_manager(debug: bool = False) -> PipelineManager:
     """Factory function to create a pipeline manager"""
@@ -1682,7 +1887,9 @@ def get_available_pipelines() -> Dict[str, str]:
     return {
         "fast": "Quick analysis for development",
         "thorough": "Comprehensive static and AI analysis",
-        "ai-enhanced": "Multi-model AI consensus with advanced correlation"
+        "ai-enhanced": "Multi-model AI consensus with advanced correlation",
+        "spoon-powered": "SpoonOS agent-driven analysis with MCP support",
+        "custom-agent": "Custom SpoonOS contract agent with specialized tools"
     }
 
 
@@ -1725,9 +1932,67 @@ async def run_pipeline_analysis(
     return results
 
 
+# SpoonOS-specific convenience functions
+async def run_spoon_analysis(
+    contract_paths: List[str],
+    agent_type: str = "react",
+    debug: bool = False
+) -> Dict[str, Any]:
+    """
+    Run analysis using SpoonOS agents
+    
+    Args:
+        contract_paths: List of contract paths
+        agent_type: Type of SpoonOS agent ("react", "spoon_react_mcp", "custom")
+        debug: Enable debug mode
+    
+    Returns:
+        Analysis results
+    """
+    pipeline_map = {
+        "react": "spoon-powered",
+        "spoon_react_mcp": "spoon-powered", 
+        "custom": "custom-agent"
+    }
+    
+    pipeline = pipeline_map.get(agent_type, "spoon-powered")
+    custom_config = {"spoon_agent_type": agent_type}
+    
+    return await run_pipeline_analysis(
+        contract_paths=contract_paths,
+        pipeline_name=pipeline,
+        custom_config=custom_config,
+        debug=debug
+    )
+
+
+def setup_spoon_environment():
+    """Setup SpoonOS environment variables and configuration"""
+    required_vars = {
+        "SPOON_API_KEY": "SpoonOS API key or OpenAI key for OpenRouter",
+        "SPOON_MODEL": "Model name (default: anthropic/claude-3-5-sonnet-20241022)",
+        "SPOON_BASE_URL": "Base URL (default: https://openrouter.ai/api/v1)"
+    }
+    
+    missing_vars = []
+    for var, desc in required_vars.items():
+        if not os.getenv(var):
+            missing_vars.append(f"{var}: {desc}")
+    
+    if missing_vars:
+        print("SpoonOS Environment Setup Required:")
+        print("=" * 50)
+        for var in missing_vars:
+            print(f"- {var}")
+        print("\nSet these environment variables to enable SpoonOS integration.")
+        return False
+    
+    return True
+
+
 # Example usage and testing functions
-async def test_pipeline_manager():
-    """Test function for pipeline manager"""
+async def test_spoon_integration():
+    """Test SpoonOS integration"""
     # Create test contract
     test_contract = """
     pragma solidity ^0.8.0;
@@ -1755,8 +2020,111 @@ async def test_pipeline_manager():
         temp_path = f.name
     
     try:
-        # Test different pipelines
-        for pipeline in ["fast", "thorough"]:  # Skip ai-enhanced for testing
+        print("=== Testing SpoonOS Integration ===")
+        
+        # Check SpoonOS environment
+        if not setup_spoon_environment():
+            print("Skipping SpoonOS tests - environment not configured")
+            return
+        
+        # Test different SpoonOS pipelines
+        spoon_pipelines = ["spoon-powered", "custom-agent"]
+        
+        for pipeline in spoon_pipelines:
+            if not SPOON_AVAILABLE:
+                print(f"Skipping {pipeline} - SpoonOS not available")
+                continue
+                
+            print(f"\n--- Testing {pipeline} pipeline ---")
+            
+            try:
+                results = await run_pipeline_analysis(
+                    contract_paths=[temp_path],
+                    pipeline_name=pipeline,
+                    debug=True
+                )
+                
+                print(f"Pipeline: {results['pipeline']}")
+                print(f"Status: {results['status']}")
+                print(f"Duration: {results['total_duration']:.2f}s")
+                print(f"Total findings: {results['summary']['total_findings']}")
+                
+                # Show SpoonOS-specific results
+                spoon_stages = ["spoon_analysis", "custom_spoon_analysis"]
+                for stage in spoon_stages:
+                    if stage in results.get("stages", {}):
+                        stage_data = results["stages"][stage]["results"]
+                        agent_stats = stage_data.get("agent_stats", {})
+                        print(f"Agent type: {agent_stats.get('agent_type', 'unknown')}")
+                        print(f"Agent findings: {agent_stats.get('total_findings', 0)}")
+                        break
+                
+            except Exception as e:
+                print(f"Pipeline {pipeline} failed: {e}")
+                if "debug=True" in str(e):
+                    import traceback
+                    traceback.print_exc()
+        
+        # Test direct SpoonOS analysis
+        print(f"\n--- Testing direct SpoonOS analysis ---")
+        
+        for agent_type in ["react", "custom"]:
+            try:
+                print(f"Testing {agent_type} agent...")
+                results = await run_spoon_analysis(
+                    contract_paths=[temp_path],
+                    agent_type=agent_type,
+                    debug=True
+                )
+                print(f"Direct SpoonOS analysis completed: {results['summary']['total_findings']} findings")
+            except Exception as e:
+                print(f"Direct analysis with {agent_type} failed: {e}")
+    
+    finally:
+        # Clean up temp file
+        import os
+        os.unlink(temp_path)
+
+
+async def test_pipeline_manager():
+    """Test function for pipeline manager including SpoonOS integration"""
+    # Create test contract
+    test_contract = """
+    pragma solidity ^0.8.0;
+    
+    contract VulnerableContract {
+        mapping(address => uint256) public balances;
+        
+        function withdraw(uint256 amount) public {
+            require(balances[msg.sender] >= amount, "Insufficient balance");
+            (bool success, ) = msg.sender.call{value: amount}("");
+            require(success, "Transfer failed");
+            balances[msg.sender] -= amount;  // State change after external call - reentrancy!
+        }
+        
+        function deposit() public payable {
+            balances[msg.sender] += msg.value;
+        }
+    }
+    """
+    
+    # Write test contract to temp file
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.sol', delete=False) as f:
+        f.write(test_contract)
+        temp_path = f.name
+    
+    try:
+        # Test all available pipelines
+        available_pipelines = get_available_pipelines()
+        print("=== Available Pipelines ===")
+        for name, desc in available_pipelines.items():
+            print(f"- {name}: {desc}")
+        
+        # Test standard pipelines
+        standard_pipelines = ["fast", "thorough"]
+        
+        for pipeline in standard_pipelines:
             print(f"\n=== Testing {pipeline} pipeline ===")
             
             results = await run_pipeline_analysis(
@@ -1771,6 +2139,13 @@ async def test_pipeline_manager():
             print(f"Stages completed: {results['summary']['successful_stages']}/{results['summary']['total_stages']}")
             print(f"Total findings: {results['summary']['total_findings']}")
             print(f"Risk assessment: {results['summary']['risk_assessment']}")
+        
+        # Test SpoonOS integration if available
+        if SPOON_AVAILABLE:
+            await test_spoon_integration()
+        else:
+            print("\n=== SpoonOS Integration ===")
+            print("SpoonOS not available - install spoon_ai to enable agent integration")
             
     finally:
         # Clean up temp file
